@@ -1,0 +1,21 @@
+{
+  "name": "coordsync",
+  "version": "1.0.0",
+  "description": "",
+  "main": "sync.js",
+  "type": "module",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "bonjour": "^3.5.0",
+    "diont": "^1.0.0",
+    "socket.io": "^4.6.1",
+    "socket.io-client": "^4.6.1"
+  },
+  "devDependencies": {
+    "ws": "3.3.2"
+  }
+}
