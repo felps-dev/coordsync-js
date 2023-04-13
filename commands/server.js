@@ -1,6 +1,6 @@
 //Coordsync server commands
 
-import { sleep } from "../utils.js";
+import { processDataAndWaitFeedback } from "./shared.js";
 
 // Check the service name is valid
 // If it is, then the server is valid
@@ -93,32 +93,16 @@ export const server_insert_request = async (self, socket, data) => {
     const newExternalId = (await options.getLatestExternalId()) + 1;
     const data_to_insert = data.data;
     //Emit to all clients and wait until everyone inserted
-    self.current_queue = {
-      identifier: data.identifier,
-      externalId: newExternalId,
-      done: [],
-    };
-    socket.broadcast.emit("insert_request", {
-      identifier: data.identifier,
-      data: data_to_insert,
-      externalId: newExternalId,
-    });
-    let allClientsInserted = false;
-    self.logger("Waiting for all clients to insert");
-    while (!allClientsInserted) {
-      await sleep(1000);
-      for (const client of self.clients) {
-        self.logger("Checking client " + client.id);
-        const found = self.current_queue.done.find(
-          (done) => done.id === client.id
-        );
-        if (!found && client.id !== socket.id) {
-          allClientsInserted = false;
-          continue;
-        }
-      }
-      allClientsInserted = true;
-    }
+    await processDataAndWaitFeedback(
+      self,
+      options,
+      data.identifier,
+      "insert_request",
+      data_to_insert,
+      socket,
+      true,
+      (self, client, found, socket) => !found && client.id !== socket.id
+    );
     self.logger("All clients inserted");
     //Insert into local database
     await options.insert(data_to_insert, newExternalId);

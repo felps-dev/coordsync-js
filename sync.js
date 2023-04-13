@@ -1,7 +1,13 @@
 import Diont from "diont";
 import { Server as ioServer } from "socket.io";
 import { io } from "socket.io-client";
-import { client_set_clients } from "./commands/client.js";
+import {
+  client_insert_request,
+  client_insert_response,
+  client_server_validated,
+  client_set_clients,
+  client_set_data,
+} from "./commands/client.js";
 import {
   check_valid_server,
   server_get_data,
@@ -10,13 +16,17 @@ import {
   set_clients,
   set_clients_everyone,
 } from "./commands/server.js";
+import { processDataAndWaitFeedback } from "./commands/shared.js";
+import {
+  PROCESSING_INTERVAL,
+  RESTART_ON_ERROR_INTERVAL,
+  SERVICE_DISCOVERY_TIMEOUT,
+} from "./constants.js";
 import { sleep } from "./utils.js";
 
 function simple_log(message, title) {
   console.log(`[${title || "No Title"}] ${message}`);
 }
-
-const SERVICE_DISCOVERY_TIMEOUT = 2000;
 
 class SyncService {
   constructor(serviceName, servicePort, syncPort, log_enabled = true) {
@@ -73,43 +83,14 @@ class SyncService {
     this.logger(JSON.stringify(data_to_insert));
     const isServer = this.server && this.serviceOnline;
     const socket = isServer ? this.server : this.client;
-    //Get the latest external id from this options
-    const newExternalId = (await options.getLatestExternalId()) + 1;
-    //Emit to all clients and wait until everyone inserted
-    this.current_queue = {
+    const newExternalId = await processDataAndWaitFeedback(
+      this,
+      options,
       identifier,
-      externalId: newExternalId,
-      done: [],
-    };
-    socket.emit("insert_request", {
-      identifier,
-      data: data_to_insert,
-      externalId: newExternalId,
-    });
-    let allClientsInserted = false;
-    this.logger("Waiting for all clients to insert");
-    while (!allClientsInserted) {
-      await sleep(10);
-      if (isServer) {
-        for (const client of this.clients) {
-          this.logger("Checking client " + client.id);
-          const found = this.current_queue.done.find(
-            (done) => done.id === client.id
-          );
-          if (!found) {
-            allClientsInserted = false;
-            continue;
-          }
-        }
-      } else {
-        if (this.current_queue.done.length === 0) {
-          allClientsInserted = false;
-          continue;
-        }
-      }
-      allClientsInserted = true;
-    }
-    this.logger("All clients inserted");
+      "insert_request",
+      data_to_insert,
+      socket
+    );
     this.logger(JSON.stringify(this.current_queue));
     options.updateLocal(data_to_insert, newExternalId);
   }
@@ -129,7 +110,7 @@ class SyncService {
         }
         this.isSyncing = false;
       }
-    }, 10);
+    }, 200);
   }
 
   listenForServices() {
@@ -148,55 +129,25 @@ class SyncService {
   }
 
   defineClientCommands(socket) {
-    socket.on("valid_server", () => {
-      this.logger("Server said it was valid");
-      socket.emit("get_clients");
-      this.client_id = socket.id;
-    });
-    socket.on("set_clients", (clients) => {
-      client_set_clients(this, socket, clients);
-      this.logger("Got clients from server");
-      this.logger("Clients: " + JSON.stringify(this.clients));
-    });
-    socket.on("insert_request", (data) => {
-      this.logger("Got insert request from server");
-      this.logger("Data: " + JSON.stringify(data));
-      const found = this.dataToSync.find(
-        (dataSync) => dataSync.identifier === data.identifier
-      );
-      if (found) {
-        const { options } = found;
-        options.insert(data.data, data.externalId);
-        socket.emit("insert_response", {
-          identifier: data.identifier,
-          externalId: data.externalId,
-        });
-      }
-    });
-    socket.on("insert_response", (data) => {
-      this.logger("Got insert response from server");
-      this.logger("Data: " + JSON.stringify(data));
-      if (this.current_queue.identifier === data.identifier) {
-        this.current_queue.done.push({
-          id: socket.id,
-          externalId: data.externalId,
-        });
-      }
-    });
-    socket.on("set_data", async (identifier, data) => {
-      this.logger("Got set data from server");
-      this.logger("Data: " + JSON.stringify(data));
-      const found = this.dataToSync.find(
-        (dataSync) => dataSync.identifier === identifier
-      );
-      if (found) {
-        const { options } = found;
-        for (const item of data) {
-          await options.insert(item, item.externalId);
-        }
-      }
-    });
-
+    // Server said that this is a valid client
+    socket.on("valid_server", () => client_server_validated(this, socket));
+    // Server wants to update client list
+    socket.on("set_clients", (clients) =>
+      client_set_clients(this, socket, clients)
+    );
+    // Server wants to insert data
+    socket.on("insert_request", (data) =>
+      client_insert_request(this, socket, data)
+    );
+    // Server inserted data on all clients and is waiting for response
+    socket.on("insert_response", (data) =>
+      client_insert_response(this, socket, data)
+    );
+    // Server wants to update data
+    socket.on("set_data", async (identifier, data) =>
+      client_set_data(this, socket, identifier, data)
+    );
+    // Server disconnected, try to connect to next client(Assuming next client is the server)
     socket.on("disconnect", async () => {
       this.logger("Disconnected from server");
 
@@ -210,7 +161,7 @@ class SyncService {
   }
 
   async connectNextClient() {
-    await sleep(10);
+    await sleep(PROCESSING_INTERVAL);
     this.logger("Client count: " + this.clients.length);
     if (this.clients.length > 0) {
       if (this.clients[0].id === this.client_id) {
@@ -252,13 +203,6 @@ class SyncService {
     this.client.on("connect", async () => {
       this.logger("Connected as client");
       this.client.emit("check_valid_server", this.service.name);
-      for (const dataSync of this.dataToSync) {
-        this.client.emit(
-          "get_data",
-          dataSync.identifier,
-          await dataSync.options.getLatestExternalId()
-        );
-      }
     });
 
     this.defineClientCommands(this.client);
@@ -278,19 +222,26 @@ class SyncService {
   }
 
   defineServerCommands(socket) {
+    // When clients connect, we check if they are valid
     socket.on("check_valid_server", (name) =>
       check_valid_server(this, socket, name)
     );
+    // Clients can request the list of clients
     socket.on("get_clients", () => set_clients(this, socket));
+    // Clients can request a insert, that will be synced to all other clients, and after on server
     socket.on("insert_request", (data) =>
       server_insert_request(this, socket, data)
     );
+    // When client has inserted data, it will send a response to the server that it has done so
     socket.on("insert_response", (data) =>
       server_insert_response(this, socket, data)
     );
+    // Clients can request data from the server
     socket.on("get_data", (identifier, externalId) => {
       server_get_data(this, socket, identifier, externalId);
     });
+    // When a client disconnects, we remove it from the list of clients
+    // And send the new list to all clients
     socket.on("disconnect", () => {
       this.logger("Client disconnected");
       this.clients = this.clients.filter((c) => c.id !== socket.id);
@@ -300,15 +251,24 @@ class SyncService {
 
   startServer() {
     this.server = new ioServer();
+    // After a client connects, we add it to the list of clients
+    // And send the new list to all clients
     this.server.on("connection", (socket) => {
       this.logger("Someone connected to server");
       this.clients.push(socket);
       set_clients_everyone(this, socket);
       this.defineServerCommands(socket);
     });
-    this.server.on("error", (e) => {
-      this.logger("Error starting service. Trying again in 2 seconds");
+    // If the server fails to start, we try again in 2 seconds
+    // This is to prevent the server from crashing
+    this.server.on("error", async (e) => {
+      this.logger(
+        `Error starting service. Trying again in ${
+          RESTART_ON_ERROR_INTERVAL / 1000
+        } seconds`
+      );
       this.logger(e);
+      await sleep(RESTART_ON_ERROR_INTERVAL);
       this.stop();
       this.start();
     });
@@ -317,6 +277,7 @@ class SyncService {
   }
 
   start() {
+    // Start the service
     this.logger("Starting");
     this.listenForServices();
     this.startService();
@@ -324,6 +285,7 @@ class SyncService {
   }
 
   stop() {
+    // Stop the service and clear all variables
     if (this.server) {
       this.server.close();
     }
