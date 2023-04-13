@@ -223,7 +223,7 @@ class SyncService {
         const next = this.clients.shift();
         this.logger("Next client: " + JSON.stringify(next));
         if (next && next.id !== this.client_id) {
-          while (!this.client.connected && tries < 20) {
+          while (!this.client?.connected && tries < 20) {
             this.logger("Connecting to next client, tries: " + tries);
             this.connectClient(next.host, next.port);
             await sleep(5000);
