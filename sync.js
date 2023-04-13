@@ -67,13 +67,18 @@ class SyncService {
   async syncInserts(dataSync) {
     const { identifier, options } = dataSync;
     if (!options.fetchInsert) {
-      throw new Error("No fetchInsert function defined");
+      throw new Error("No fetchInsert function defined on " + identifier);
     }
     if (!options.updateLocal) {
-      throw new Error("No updateLocal function defined");
+      throw new Error("No updateLocal function defined on " + identifier);
     }
     if (!options.getLatestExternalId) {
-      throw new Error("No getLatestExternalId function defined");
+      throw new Error(
+        "No getLatestExternalId function defined on " + identifier
+      );
+    }
+    if (!options.insert) {
+      throw new Error("No insert function defined on " + identifier);
     }
     const data_to_insert = await options.fetchInsert();
     if (!data_to_insert) {

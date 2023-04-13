@@ -74,6 +74,9 @@ export const server_get_data = async (
   );
   if (found) {
     const { options } = found;
+    if (!options.getData) {
+      throw new Error("getData function not defined on " + identifier);
+    }
     const data = await options.getData(lastExternalId);
     self.logger("Sending data to client");
     self.logger("Data: " + JSON.stringify(data));
