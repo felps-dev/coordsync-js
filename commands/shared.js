@@ -12,11 +12,12 @@ export const processDataAndWaitFeedback = async (
   customCheckingCallback = null
 ) => {
   //Get the latest external id from this options
-  const newExternalId = (await options.getLatestExternalId()) + 1;
+  const externalId =
+    data.externalId || (await options.getLatestExternalId()) + 1;
   //Emit to all clients and wait until everyone inserted
   self.current_queue = {
     identifier,
-    externalId: newExternalId,
+    externalId: externalId,
     done: [],
   };
   const isServer = self.server && self.serviceOnline;
@@ -24,7 +25,7 @@ export const processDataAndWaitFeedback = async (
   emitter.emit(procedure, {
     identifier: identifier,
     data: data,
-    externalId: newExternalId,
+    externalId: externalId,
   });
   let allClientsInserted = false;
   self.logger("Waiting for all clients to insert");
@@ -56,5 +57,5 @@ export const processDataAndWaitFeedback = async (
     }
     allClientsInserted = true;
   }
-  return newExternalId;
+  return externalId;
 };

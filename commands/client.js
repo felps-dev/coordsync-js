@@ -44,6 +44,35 @@ export const client_insert_response = (self, socket, data) => {
   }
 };
 
+export const client_update_request = (self, socket, data) => {
+  self.logger("Got update request from server");
+  self.logger("Data: " + JSON.stringify(data));
+  const found = self.dataToSync.find(
+    (dataSync) => dataSync.identifier === data.identifier
+  );
+  if (found) {
+    const { options } = found;
+    if (options.decideUpdate(data.data)) {
+      options.update(data.data);
+    }
+    socket.emit("update_response", {
+      identifier: data.identifier,
+      externalId: data.externalId,
+    });
+  }
+};
+
+export const client_update_response = (self, socket, data) => {
+  self.logger("Got update response from server");
+  self.logger("Data: " + JSON.stringify(data));
+  if (self.current_queue.identifier === data.identifier) {
+    self.current_queue.done.push({
+      id: socket.id,
+      externalId: data.externalId,
+    });
+  }
+};
+
 export const client_set_data = async (self, socket, identifier, data) => {
   self.logger("Got set data from server");
   self.logger("Data: " + JSON.stringify(data));

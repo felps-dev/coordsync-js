@@ -46,8 +46,95 @@ export const set_clients_everyone = (self, socket) => {
   );
 };
 
+export const server_insert_request = async (self, socket, data) => {
+  self.logger("Client requested insert");
+  self.logger("Data: " + JSON.stringify(data));
+  const found = self.dataToSync.find(
+    (dataSync) => dataSync.identifier === data.identifier
+  );
+  if (found) {
+    const { options } = found;
+
+    const newExternalId = (await options.getLatestExternalId()) + 1;
+    const data_to_insert = data.data;
+    //Emit to all clients and wait until everyone inserted
+    await processDataAndWaitFeedback(
+      self,
+      options,
+      data.identifier,
+      "insert_request",
+      data_to_insert,
+      socket,
+      true,
+      (self, client, found, socket) => !found && client.id !== socket.id
+    );
+    self.logger("All clients inserted");
+    //Insert into local database
+    await options.insert(data_to_insert, newExternalId);
+    await socket.emit("insert_response", {
+      identifier: data.identifier,
+      externalId: newExternalId,
+    });
+  }
+};
+
 export const server_insert_response = (self, socket, data) => {
   self.logger("Insert response from client");
+  self.logger(JSON.stringify(data));
+  const server_queue = self.current_queue;
+  if (
+    server_queue.identifier === data.identifier &&
+    server_queue.externalId == data.externalId
+  ) {
+    self.current_queue.done.push({
+      id: socket.id,
+    });
+  }
+};
+
+export const server_update_request = async (self, socket, data) => {
+  self.logger("Client requested update");
+  self.logger("Data: " + JSON.stringify(data));
+  const found = self.dataToSync.find(
+    (dataSync) => dataSync.identifier === data.identifier
+  );
+  if (found) {
+    const { options } = found;
+
+    const data_to_update = data.data;
+
+    if (!options.decideUpdate(data.data)) {
+      self.logger("Server decided to not update due to decideUpdate function");
+      await socket.emit("update_response", {
+        identifier: data.identifier,
+        externalId: data.externalId,
+      });
+      return;
+    }
+
+    //Emit to all clients and wait until everyone updated
+    await processDataAndWaitFeedback(
+      self,
+      options,
+      data.identifier,
+      "update_request",
+      data_to_update,
+      socket,
+      true,
+      (self, client, found, socket) => !found && client.id !== socket.id
+    );
+    self.logger("All clients updated");
+    //Update local database
+    await options.update(data_to_update);
+    await socket.emit("update_response", {
+      identifier: data.identifier,
+      externalId: data.externalId,
+    });
+  }
+};
+
+export const server_update_response = (self, socket, data) => {
+  self.logger("Update response from client");
   self.logger(JSON.stringify(data));
   const server_queue = self.current_queue;
   if (
@@ -81,37 +168,5 @@ export const server_get_data = async (
     self.logger("Sending data to client");
     self.logger("Data: " + JSON.stringify(data));
     socket.emit("set_data", identifier, data);
-  }
-};
-
-export const server_insert_request = async (self, socket, data) => {
-  self.logger("Client requested insert");
-  self.logger("Data: " + JSON.stringify(data));
-  const found = self.dataToSync.find(
-    (dataSync) => dataSync.identifier === data.identifier
-  );
-  if (found) {
-    const { options } = found;
-
-    const newExternalId = (await options.getLatestExternalId()) + 1;
-    const data_to_insert = data.data;
-    //Emit to all clients and wait until everyone inserted
-    await processDataAndWaitFeedback(
-      self,
-      options,
-      data.identifier,
-      "insert_request",
-      data_to_insert,
-      socket,
-      true,
-      (self, client, found, socket) => !found && client.id !== socket.id
-    );
-    self.logger("All clients inserted");
-    //Insert into local database
-    await options.insert(data_to_insert, newExternalId);
-    await socket.emit("insert_response", {
-      identifier: data.identifier,
-      externalId: newExternalId,
-    });
   }
 };

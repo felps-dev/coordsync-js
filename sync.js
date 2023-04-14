@@ -7,12 +7,16 @@ import {
   client_server_validated,
   client_set_clients,
   client_set_data,
+  client_update_request,
+  client_update_response,
 } from "./commands/client.js";
 import {
   check_valid_server,
   server_get_data,
   server_insert_request,
   server_insert_response,
+  server_update_request,
+  server_update_response,
   set_clients,
   set_clients_everyone,
 } from "./commands/server.js";
@@ -69,8 +73,8 @@ class SyncService {
     if (!options.fetchInsert) {
       throw new Error("No fetchInsert function defined on " + identifier);
     }
-    if (!options.updateLocal) {
-      throw new Error("No updateLocal function defined on " + identifier);
+    if (!options.afterInsert) {
+      throw new Error("No afterInsert function defined on " + identifier);
     }
     if (!options.getLatestExternalId) {
       throw new Error(
@@ -97,7 +101,35 @@ class SyncService {
       socket
     );
     this.logger(JSON.stringify(this.current_queue));
-    options.updateLocal(data_to_insert, newExternalId);
+    options.afterInsert(data_to_insert, newExternalId);
+  }
+
+  async syncUpdates(dataSync) {
+    const { identifier, options } = dataSync;
+    if (!options.fetchUpdate) {
+      throw new Error("No fetchUpdate function defined on " + identifier);
+    }
+    if (!options.update) {
+      throw new Error("No update function defined on " + identifier);
+    }
+    const data_to_update = await options.fetchUpdate();
+    if (!data_to_update) {
+      return;
+    }
+    this.logger("Updating data");
+    this.logger(JSON.stringify(data_to_update));
+    const isServer = this.server && this.serviceOnline;
+    const socket = isServer ? this.server : this.client;
+    await processDataAndWaitFeedback(
+      this,
+      options,
+      identifier,
+      "update_request",
+      data_to_update,
+      socket
+    );
+    this.logger(JSON.stringify(this.current_queue));
+    options.afterUpdate(data_to_update);
   }
 
   startSyncing() {
@@ -112,6 +144,7 @@ class SyncService {
         for (let index = 0; index < this.dataToSync.length; index++) {
           const dataSync = this.dataToSync[index];
           await this.syncInserts(dataSync);
+          await this.syncUpdates(dataSync);
         }
         this.isSyncing = false;
       }
@@ -147,6 +180,14 @@ class SyncService {
     // Server inserted data on all clients and is waiting for response
     socket.on("insert_response", (data) =>
       client_insert_response(this, socket, data)
+    );
+    // Server wants to update data
+    socket.on("update_request", (data) =>
+      client_update_request(this, socket, data)
+    );
+    // Server updated data on all clients and is waiting for response
+    socket.on("update_response", (data) =>
+      client_update_response(this, socket, data)
     );
     // Server wants to update data
     socket.on("set_data", async (identifier, data) =>
@@ -240,6 +281,14 @@ class SyncService {
     // When client has inserted data, it will send a response to the server that it has done so
     socket.on("insert_response", (data) =>
       server_insert_response(this, socket, data)
+    );
+    // Clients can request a update, that will be synced to all other clients, and after on server
+    socket.on("update_request", (data) =>
+      server_update_request(this, socket, data)
+    );
+    // When client has updated data, it will send a response to the server that it has done so
+    socket.on("update_response", (data) =>
+      server_update_response(this, socket, data)
     );
     // Clients can request data from the server
     socket.on("get_data", (identifier, externalId) => {
