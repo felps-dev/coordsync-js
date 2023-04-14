@@ -73,6 +73,33 @@ export const client_update_response = (self, socket, data) => {
   }
 };
 
+export const client_delete_request = (self, socket, data) => {
+  self.logger("Got delete request from server");
+  self.logger("Data: " + JSON.stringify(data));
+  const found = self.dataToSync.find(
+    (dataSync) => dataSync.identifier === data.identifier
+  );
+  if (found) {
+    const { options } = found;
+    options.delete(data.data);
+    socket.emit("delete_response", {
+      identifier: data.identifier,
+      externalId: data.externalId,
+    });
+  }
+};
+
+export const client_delete_response = (self, socket, data) => {
+  self.logger("Got delete response from server");
+  self.logger("Data: " + JSON.stringify(data));
+  if (self.current_queue.identifier === data.identifier) {
+    self.current_queue.done.push({
+      id: socket.id,
+      externalId: data.externalId,
+    });
+  }
+};
+
 export const client_set_data = async (self, socket, identifier, data) => {
   self.logger("Got set data from server");
   self.logger("Data: " + JSON.stringify(data));

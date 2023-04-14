@@ -31,6 +31,7 @@ syncService.defineSync("test", {
       externalId,
       mustUpdate: false,
       lastUpdate: data.lastUpdate,
+      mustDelete: false,
     });
     refreshScreen();
   },
@@ -43,7 +44,7 @@ syncService.defineSync("test", {
   fetchUpdate: async () => {
     return chat_messages.find((message) => message.mustUpdate == true);
   },
-  decideUpdate: async (newData) => {
+  decideUpdate: (newData) => {
     const localData = chat_messages.find(
       (message) => message.externalId == newData.externalId
     );
@@ -57,6 +58,28 @@ syncService.defineSync("test", {
     message.date = data.date;
     message.mustUpdate = null;
     message.lastUpdate = data.lastUpdate;
+    message.mustDelete = false;
+    refreshScreen();
+  },
+  afterDelete: async (data) => {
+    //Remove from local array
+    const index = chat_messages.findIndex(
+      (message) => message.externalId == data.externalId
+    );
+    chat_messages.splice(index, 1);
+  },
+  fetchDelete: async () => {
+    return chat_messages.find((message) => message.mustDelete == true);
+  },
+  decideDelete: () => {
+    return true;
+  },
+  delete: async (data) => {
+    // Remove from local array
+    const index = chat_messages.findIndex(
+      (message) => message.externalId == data.externalId
+    );
+    chat_messages.splice(index, 1);
     refreshScreen();
   },
 });
@@ -71,9 +94,11 @@ const rl = readline.createInterface({
 const refreshScreen = () => {
   console.clear();
   console.log("Messages:");
-  chat_messages.forEach((message) => {
-    console.log(`${message.message}`);
-  });
+  chat_messages
+    .filter((message) => !message.mustDelete)
+    .forEach((message) => {
+      console.log(`${message.message}`);
+    });
 };
 
 function do_question() {
@@ -87,6 +112,12 @@ function do_question() {
       messageToUpdate.message = newMessage;
       messageToUpdate.mustUpdate = true;
       messageToUpdate.lastUpdate = new Date();
+      messageToUpdate.mustDelete = false;
+    } else if (message.startsWith("!delete;")) {
+      // eslint-disable-next-line no-unused-vars
+      const [_, index] = message.split(";");
+      const messageToDelete = chat_messages[index];
+      messageToDelete.mustDelete = true;
     } else {
       chat_messages.push({
         message,
@@ -94,6 +125,7 @@ function do_question() {
         externalId: null,
         mustUpdate: null,
         lastUpdate: new Date(),
+        mustDelete: false,
       });
     }
     do_question();

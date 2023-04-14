@@ -147,6 +147,61 @@ export const server_update_response = (self, socket, data) => {
   }
 };
 
+export const server_delete_request = async (self, socket, data) => {
+  self.logger("Client requested delete");
+  self.logger("Data: " + JSON.stringify(data));
+  const found = self.dataToSync.find(
+    (dataSync) => dataSync.identifier === data.identifier
+  );
+  if (found) {
+    const { options } = found;
+
+    const data_to_delete = data.data;
+
+    if (!options.decideDelete(data.data)) {
+      self.logger("Server decided to not delete due to decideDelete function");
+      await socket.emit("delete_response", {
+        identifier: data.identifier,
+        externalId: data.externalId,
+      });
+      return;
+    }
+
+    //Emit to all clients and wait until everyone deleted
+    await processDataAndWaitFeedback(
+      self,
+      options,
+      data.identifier,
+      "delete_request",
+      data_to_delete,
+      socket,
+      true,
+      (self, client, found, socket) => !found && client.id !== socket.id
+    );
+    self.logger("All clients deleted");
+    //Delete from local database
+    await options.delete(data_to_delete);
+    await socket.emit("delete_response", {
+      identifier: data.identifier,
+      externalId: data.externalId,
+    });
+  }
+};
+
+export const server_delete_response = (self, socket, data) => {
+  self.logger("Delete response from client");
+  self.logger(JSON.stringify(data));
+  const server_queue = self.current_queue;
+  if (
+    server_queue.identifier === data.identifier &&
+    server_queue.externalId == data.externalId
+  ) {
+    self.current_queue.done.push({
+      id: socket.id,
+    });
+  }
+};
+
 export const server_get_data = async (
   self,
   socket,

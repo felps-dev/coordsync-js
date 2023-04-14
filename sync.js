@@ -2,6 +2,8 @@ import Diont from "diont";
 import { Server as ioServer } from "socket.io";
 import { io } from "socket.io-client";
 import {
+  client_delete_request,
+  client_delete_response,
   client_insert_request,
   client_insert_response,
   client_server_validated,
@@ -12,6 +14,8 @@ import {
 } from "./commands/client.js";
 import {
   check_valid_server,
+  server_delete_request,
+  server_delete_response,
   server_get_data,
   server_insert_request,
   server_insert_response,
@@ -132,6 +136,34 @@ class SyncService {
     options.afterUpdate(data_to_update);
   }
 
+  async syncDeletes(dataSync) {
+    const { identifier, options } = dataSync;
+    if (!options.fetchDelete) {
+      throw new Error("No fetchDelete function defined on " + identifier);
+    }
+    if (!options.delete) {
+      throw new Error("No delete function defined on " + identifier);
+    }
+    const data_to_delete = await options.fetchDelete();
+    if (!data_to_delete) {
+      return;
+    }
+    this.logger("Deleting data");
+    this.logger(JSON.stringify(data_to_delete));
+    const isServer = this.server && this.serviceOnline;
+    const socket = isServer ? this.server : this.client;
+    await processDataAndWaitFeedback(
+      this,
+      options,
+      identifier,
+      "delete_request",
+      data_to_delete,
+      socket
+    );
+    this.logger(JSON.stringify(this.current_queue));
+    options.afterDelete(data_to_delete);
+  }
+
   startSyncing() {
     this.syncInterval = setInterval(async () => {
       if (
@@ -145,6 +177,7 @@ class SyncService {
           const dataSync = this.dataToSync[index];
           await this.syncInserts(dataSync);
           await this.syncUpdates(dataSync);
+          await this.syncDeletes(dataSync);
         }
         this.isSyncing = false;
       }
@@ -188,6 +221,14 @@ class SyncService {
     // Server updated data on all clients and is waiting for response
     socket.on("update_response", (data) =>
       client_update_response(this, socket, data)
+    );
+    // Server wants to delete data
+    socket.on("delete_request", (data) =>
+      client_delete_request(this, socket, data)
+    );
+    // Server deleted data on all clients and is waiting for response
+    socket.on("delete_response", (data) =>
+      client_delete_response(this, socket, data)
     );
     // Server wants to update data
     socket.on("set_data", async (identifier, data) =>
@@ -289,6 +330,14 @@ class SyncService {
     // When client has updated data, it will send a response to the server that it has done so
     socket.on("update_response", (data) =>
       server_update_response(this, socket, data)
+    );
+    // Clients can request a delete, that will be synced to all other clients, and after on server
+    socket.on("delete_request", (data) =>
+      server_delete_request(this, socket, data)
+    );
+    // When client has deleted data, it will send a response to the server that it has done so
+    socket.on("delete_response", (data) =>
+      server_delete_response(this, socket, data)
     );
     // Clients can request data from the server
     socket.on("get_data", (identifier, externalId) => {

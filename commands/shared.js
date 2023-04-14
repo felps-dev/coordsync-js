@@ -14,7 +14,7 @@ export const processDataAndWaitFeedback = async (
   //Get the latest external id from this options
   const externalId =
     data.externalId || (await options.getLatestExternalId()) + 1;
-  //Emit to all clients and wait until everyone inserted
+  //Emit to all clients and wait until everyone Done
   self.current_queue = {
     identifier,
     externalId: externalId,
@@ -27,9 +27,9 @@ export const processDataAndWaitFeedback = async (
     data: data,
     externalId: externalId,
   });
-  let allClientsInserted = false;
-  self.logger("Waiting for all clients to insert");
-  while (!allClientsInserted) {
+  let allClientsDone = false;
+  self.logger("Waiting for all clients...");
+  while (!allClientsDone) {
     await sleep(PROCESSING_INTERVAL);
     if (isServer) {
       for (const client of self.clients) {
@@ -39,23 +39,23 @@ export const processDataAndWaitFeedback = async (
         );
         if (customCheckingCallback) {
           if (!customCheckingCallback(self, client, found, socket)) {
-            allClientsInserted = false;
+            allClientsDone = false;
             continue;
           }
         } else {
           if (!found) {
-            allClientsInserted = false;
+            allClientsDone = false;
             continue;
           }
         }
       }
     } else {
       if (self.current_queue.done.length === 0) {
-        allClientsInserted = false;
+        allClientsDone = false;
         continue;
       }
     }
-    allClientsInserted = true;
+    allClientsDone = true;
   }
   return externalId;
 };
