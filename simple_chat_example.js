@@ -48,7 +48,7 @@ syncService.defineSync("test", {
     const localData = chat_messages.find(
       (message) => message.externalId == newData.externalId
     );
-    return newData.lastUpdate > localData.lastUpdate;
+    return Date.parse(newData.lastUpdate) > Date.parse(localData.lastUpdate);
   },
   update: async (data) => {
     const message = chat_messages.find(
