@@ -1,6 +1,7 @@
 import Diont from "diont";
 import { Server as ioServer } from "socket.io";
 import { io } from "socket.io-client";
+import { insert_change, open_change_db } from "./changes_db.js";
 import {
   client_delete_request,
   client_delete_response,
@@ -37,7 +38,13 @@ function simple_log(message, title) {
 }
 
 class SyncService {
-  constructor(serviceName, servicePort, syncPort, log_enabled = true) {
+  constructor(
+    serviceName,
+    servicePort,
+    syncPort,
+    log_enabled = true,
+    change_database_name = "changes_database"
+  ) {
     this.diont = Diont();
     this.service = {
       name: serviceName,
@@ -63,6 +70,7 @@ class SyncService {
     this.logger = (message, title) =>
       log_enabled ? simple_log(message, title) : null;
     this.log_enabled = log_enabled;
+    this.db = open_change_db(change_database_name);
   }
 
   defineSync(identifier, options) {
@@ -134,6 +142,7 @@ class SyncService {
     );
     this.logger(JSON.stringify(this.current_queue));
     options.afterUpdate(data_to_update);
+    insert_change(this.db, identifier, data_to_update.externalId, "update");
   }
 
   async syncDeletes(dataSync) {
@@ -162,6 +171,7 @@ class SyncService {
     );
     this.logger(JSON.stringify(this.current_queue));
     options.afterDelete(data_to_delete);
+    insert_change(this.db, identifier, data_to_delete.externalId, "delete");
   }
 
   startSyncing() {
@@ -231,8 +241,8 @@ class SyncService {
       client_delete_response(this, socket, data)
     );
     // Server wants to update data
-    socket.on("set_data", async (identifier, data) =>
-      client_set_data(this, socket, identifier, data)
+    socket.on("set_data", async (identifier, data, changes) =>
+      client_set_data(this, socket, identifier, data, changes)
     );
     // Server disconnected, try to connect to next client(Assuming next client is the server)
     socket.on("disconnect", async () => {
@@ -340,8 +350,8 @@ class SyncService {
       server_delete_response(this, socket, data)
     );
     // Clients can request data from the server
-    socket.on("get_data", (identifier, externalId) => {
-      server_get_data(this, socket, identifier, externalId);
+    socket.on("get_data", (identifier, externalId, latestChange) => {
+      server_get_data(this, socket, identifier, externalId, latestChange);
     });
     // When a client disconnects, we remove it from the list of clients
     // And send the new list to all clients

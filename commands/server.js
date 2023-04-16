@@ -1,5 +1,10 @@
 //Coordsync server commands
 
+import {
+  get_changes,
+  get_latest_change,
+  insert_change,
+} from "../changes_db.js";
 import { processDataAndWaitFeedback } from "./shared.js";
 
 // Check the service name is valid
@@ -55,7 +60,6 @@ export const server_insert_request = async (self, socket, data) => {
   if (found) {
     const { options } = found;
 
-    const newExternalId = (await options.getLatestExternalId()) + 1;
     const data_to_insert = data.data;
     //Emit to all clients and wait until everyone inserted
     await processDataAndWaitFeedback(
@@ -70,6 +74,7 @@ export const server_insert_request = async (self, socket, data) => {
     );
     self.logger("All clients inserted");
     //Insert into local database
+    const newExternalId = (await options.getLatestExternalId()) + 1;
     await options.insert(data_to_insert, newExternalId);
     await socket.emit("insert_response", {
       identifier: data.identifier,
@@ -103,7 +108,7 @@ export const server_update_request = async (self, socket, data) => {
 
     const data_to_update = data.data;
 
-    if (!options.decideUpdate(data.data)) {
+    if (!(await options.decideUpdate(data.data))) {
       self.logger("Server decided to not update due to decideUpdate function");
       await socket.emit("update_response", {
         identifier: data.identifier,
@@ -126,6 +131,7 @@ export const server_update_request = async (self, socket, data) => {
     self.logger("All clients updated");
     //Update local database
     await options.update(data_to_update);
+    await insert_change(self.db, data.identifier, data.externalId, "update");
     await socket.emit("update_response", {
       identifier: data.identifier,
       externalId: data.externalId,
@@ -181,6 +187,7 @@ export const server_delete_request = async (self, socket, data) => {
     self.logger("All clients deleted");
     //Delete from local database
     await options.delete(data_to_delete);
+    await insert_change(self.db, data.identifier, data.externalId, "delete");
     await socket.emit("delete_response", {
       identifier: data.identifier,
       externalId: data.externalId,
@@ -206,7 +213,8 @@ export const server_get_data = async (
   self,
   socket,
   identifier,
-  lastExternalId
+  lastExternalId,
+  latestChange
 ) => {
   self.logger("Client requested data");
   self.logger("Identifier: " + identifier);
@@ -220,8 +228,20 @@ export const server_get_data = async (
       throw new Error("getData function not defined on " + identifier);
     }
     const data = await options.getData(lastExternalId);
+    const changes =
+      (latestChange
+        ? await get_changes(self.db, identifier, latestChange.index)
+        : [await get_latest_change(self.db, identifier)]) || [];
+    for (const change of changes) {
+      if (change && change.type === "update") {
+        const data_to_update = await options.getData(change.id, change.id);
+        if (data_to_update.length > 0) {
+          data.push(data_to_update[0]);
+        }
+      }
+    }
     self.logger("Sending data to client");
     self.logger("Data: " + JSON.stringify(data));
-    socket.emit("set_data", identifier, data);
+    socket.emit("set_data", identifier, data, changes);
   }
 };

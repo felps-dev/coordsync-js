@@ -1,31 +1,62 @@
+/* eslint-disable no-console */
 import readline from "readline";
 import SyncService from "./sync.js";
-const chat_messages = [];
 
-const syncService = new SyncService("TestServer 1", 8002, 8001, false);
+import Datastore from "@seald-io/nedb";
+
+const chat_database = new Datastore({
+  filename: "databases/chat_db_" + process.argv[2] + ".db",
+  autoload: true,
+});
+
+const syncService = new SyncService(
+  "TestServer 1",
+  8002,
+  8001,
+  false,
+  "databases/" + process.argv[2]
+);
+
+const errors = [];
+
+const logerror = (err) => {
+  if (err) {
+    errors.push(err);
+  }
+};
 
 syncService.defineSync("test", {
   getLatestExternalId: async () => {
-    return chat_messages.reduce((max, message) => {
-      if (message.externalId > max) {
-        return message.externalId;
-      } else {
-        return max;
-      }
-    }, 0);
+    const latest = await chat_database
+      .findOneAsync({ externalId: { $ne: null } })
+      .sort({ externalId: -1 });
+    if (latest) {
+      return latest.externalId;
+    }
+    return 0;
   },
-  getData: async (externalId) => {
-    return chat_messages.filter((message) => message.externalId > externalId);
+  getData: async (from, to) => {
+    if (to) {
+      return await chat_database.findAsync({
+        externalId: { $gte: from, $lte: to },
+      });
+    }
+    return await chat_database.findAsync({ externalId: { $gte: from } });
   },
   afterInsert: async (data, externalId) => {
-    const message = chat_messages.find((message) => message.externalId == null);
-    message.externalId = externalId;
+    await chat_database.updateAsync(
+      { _id: data._id },
+      { $set: { externalId } },
+      {},
+      logerror
+    );
+    refreshScreen();
   },
   fetchInsert: async () => {
-    return chat_messages.find((message) => message.externalId == null);
+    return await chat_database.findOneAsync({ externalId: null });
   },
   insert: async (data, externalId) => {
-    chat_messages.push({
+    await chat_database.insert({
       message: data.message,
       date: data.date,
       externalId,
@@ -36,50 +67,60 @@ syncService.defineSync("test", {
     refreshScreen();
   },
   afterUpdate: async (data) => {
-    const message = chat_messages.find(
-      (message) => message.externalId == data.externalId
+    await chat_database.updateAsync(
+      { externalId: data.externalId },
+      { $set: { mustUpdate: false } },
+      {},
+      logerror
     );
-    message.mustUpdate = false;
+    refreshScreen();
   },
   fetchUpdate: async () => {
-    return chat_messages.find((message) => message.mustUpdate == true);
+    return await chat_database.findOneAsync({ mustUpdate: true });
   },
-  decideUpdate: (newData) => {
-    const localData = chat_messages.find(
-      (message) => message.externalId == newData.externalId
-    );
+  decideUpdate: async (newData) => {
+    const localData = await chat_database.findOneAsync({
+      externalId: newData.externalId,
+    });
     return Date.parse(newData.lastUpdate) > Date.parse(localData.lastUpdate);
   },
   update: async (data) => {
-    const message = chat_messages.find(
-      (message) => message.externalId == data.externalId
+    await chat_database.updateAsync(
+      { externalId: data.externalId },
+      {
+        $set: {
+          message: data.message,
+          date: data.date,
+          mustUpdate: false,
+          lastUpdate: data.lastUpdate,
+          mustDelete: false,
+        },
+      },
+      {},
+      logerror
     );
-    message.message = data.message;
-    message.date = data.date;
-    message.mustUpdate = null;
-    message.lastUpdate = data.lastUpdate;
-    message.mustDelete = false;
     refreshScreen();
   },
   afterDelete: async (data) => {
-    //Remove from local array
-    const index = chat_messages.findIndex(
-      (message) => message.externalId == data.externalId
+    await chat_database.removeAsync(
+      { externalId: Number(data.externalId) },
+      {},
+      logerror
     );
-    chat_messages.splice(index, 1);
+    refreshScreen();
   },
   fetchDelete: async () => {
-    return chat_messages.find((message) => message.mustDelete == true);
+    return await chat_database.findOneAsync({ mustDelete: true });
   },
   decideDelete: () => {
     return true;
   },
   delete: async (data) => {
-    // Remove from local array
-    const index = chat_messages.findIndex(
-      (message) => message.externalId == data.externalId
+    await chat_database.removeAsync(
+      { externalId: Number(data.externalId) },
+      {},
+      logerror
     );
-    chat_messages.splice(index, 1);
     refreshScreen();
   },
 });
@@ -91,14 +132,17 @@ const rl = readline.createInterface({
   output: process.stdout,
 });
 
-const refreshScreen = () => {
+const refreshScreen = async () => {
   console.clear();
+  console.log("Errors:");
+  for (const error of errors) {
+    console.log(error);
+  }
   console.log("Messages:");
-  chat_messages
-    .filter((message) => !message.mustDelete)
-    .forEach((message) => {
-      console.log(`${message.message}`);
-    });
+  const messages = await chat_database.findAsync({}).sort({ externalId: 1 });
+  for (const message of messages) {
+    console.log(`${message.date} - ${message.message} - ${message.externalId}`);
+  }
 };
 
 function do_question() {
@@ -108,18 +152,34 @@ function do_question() {
     if (message.startsWith("!update;")) {
       // eslint-disable-next-line no-unused-vars
       const [_, index, newMessage] = message.split(";");
-      const messageToUpdate = chat_messages[index];
-      messageToUpdate.message = newMessage;
-      messageToUpdate.mustUpdate = true;
-      messageToUpdate.lastUpdate = new Date();
-      messageToUpdate.mustDelete = false;
+      chat_database.updateAsync(
+        { externalId: Number(index) },
+        {
+          $set: {
+            message: newMessage,
+            mustUpdate: true,
+            lastUpdate: new Date(),
+            mustDelete: false,
+          },
+        },
+        {},
+        logerror
+      );
     } else if (message.startsWith("!delete;")) {
       // eslint-disable-next-line no-unused-vars
       const [_, index] = message.split(";");
-      const messageToDelete = chat_messages[index];
-      messageToDelete.mustDelete = true;
+      chat_database.updateAsync(
+        { externalId: Number(index) },
+        {
+          $set: {
+            mustDelete: true,
+          },
+        },
+        {},
+        logerror
+      );
     } else {
-      chat_messages.push({
+      chat_database.insert({
         message,
         date: new Date(),
         externalId: null,
@@ -132,5 +192,5 @@ function do_question() {
     refreshScreen();
   });
 }
-
+refreshScreen();
 do_question();
