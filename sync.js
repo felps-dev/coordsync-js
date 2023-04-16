@@ -304,16 +304,15 @@ class SyncService {
 
     this.defineClientCommands(this.client);
     this.client.connect();
-    // Add custom listeners to sync data here
   }
 
   startService() {
-    setTimeout(() => {
+    setTimeout(async () => {
       if (!this.serviceFound) {
         this.logger("No service found");
         this.logger("Starting service");
         this.diont.announceService(this.service);
-        this.startServer();
+        await this.startServer();
       }
     }, SERVICE_DISCOVERY_TIMEOUT);
   }
@@ -362,7 +361,7 @@ class SyncService {
     });
   }
 
-  startServer() {
+  async startServer() {
     this.server = new ioServer();
     // After a client connects, we add it to the list of clients
     // And send the new list to all clients
@@ -397,10 +396,18 @@ class SyncService {
     this.startSyncing();
   }
 
+  becomeClient() {
+    // Become a client
+    this.logger("Becoming client");
+    this.stop();
+    this.listenForServices();
+  }
+
   stop() {
     // Stop the service and clear all variables
     if (this.server) {
       this.server.close();
+      this.server.httpServer.close();
     }
     if (this.client) {
       this.client.disconnect();

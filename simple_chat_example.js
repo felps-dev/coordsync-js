@@ -141,7 +141,7 @@ const refreshScreen = async () => {
   console.log("Messages:");
   const messages = await chat_database.findAsync({}).sort({ externalId: 1 });
   for (const message of messages) {
-    console.log(`${message.date} - ${message.message} - ${message.externalId}`);
+    console.log(`${message.message} - ${message.externalId}`);
   }
 };
 

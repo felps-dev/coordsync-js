@@ -227,6 +227,12 @@ export const server_get_data = async (
     if (!options.getData) {
       throw new Error("getData function not defined on " + identifier);
     }
+    const server_last_external_id = await options.getLatestExternalId();
+    if (server_last_external_id < lastExternalId) {
+      self.logger("Server has less data than client");
+      self.becomeClient();
+      return;
+    }
     const data = await options.getData(lastExternalId);
     const changes =
       (latestChange
