@@ -1,4 +1,8 @@
-import { get_latest_change, insert_change } from "../changes_db.js";
+import {
+  get_changes,
+  get_latest_change,
+  insert_change,
+} from "../changes_db.js";
 
 export const client_set_clients = (self, socket, clients) => {
   self.logger("Got clients from server");
@@ -12,10 +16,13 @@ export const client_server_validated = async (self, socket) => {
   self.client_id = socket.id;
   for (const dataSync of self.dataToSync) {
     const latest_change = await get_latest_change(self.db, dataSync.identifier);
+    self.logger("Latest change: " + latest_change);
+    self.logger("Sending get_data request to server");
+    self.logger("Identifier: " + dataSync.identifier);
     self.client.emit(
       "get_data",
       dataSync.identifier,
-      latest_change ? await dataSync.options.getLatestExternalId() : 0,
+      await dataSync.options.getLatestExternalId(),
       latest_change
     );
   }
@@ -121,9 +128,11 @@ export const client_set_data = async (
   if (found) {
     const { options } = found;
     for (const item of data) {
-      if (
-        (await options.getData(item.externalId, item.externalId)).length === 0
-      ) {
+      const local_data = await options.getData(
+        item.externalId,
+        item.externalId
+      );
+      if (local_data.length === 0) {
         await options.insert(item, item.externalId);
       } else {
         await options.update(item);
@@ -136,5 +145,42 @@ export const client_set_data = async (
       }
       insert_change(self.db, identifier, change.id, change.type, change.index);
     }
+  }
+};
+
+export const client_get_data = async (
+  self,
+  socket,
+  identifier,
+  lastExternalId,
+  latestChange
+) => {
+  self.logger("Server requested data");
+  self.logger("Identifier: " + identifier);
+  self.logger("Last external id: " + lastExternalId);
+  const found = self.dataToSync.find(
+    (dataSync) => dataSync.identifier === identifier
+  );
+  if (found) {
+    const { options } = found;
+    if (!options.getData) {
+      throw new Error("getData function not defined on " + identifier);
+    }
+    const data = await options.getData(Number(lastExternalId) + 1);
+    const changes =
+      (latestChange
+        ? await get_changes(self.db, identifier, latestChange.index)
+        : [await get_latest_change(self.db, identifier)]) || [];
+    for (const change of changes) {
+      if (change && change.type === "update") {
+        const data_to_update = await options.getData(change.id, change.id);
+        if (data_to_update.length > 0) {
+          data.push(data_to_update[0]);
+        }
+      }
+    }
+    self.logger("Sending data to server");
+    self.logger("Data: " + JSON.stringify(data));
+    socket.emit("set_data", identifier, data, changes);
   }
 };

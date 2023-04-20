@@ -5,6 +5,7 @@ import { insert_change, open_change_db } from "./changes_db.js";
 import {
   client_delete_request,
   client_delete_response,
+  client_get_data,
   client_insert_request,
   client_insert_response,
   client_server_validated,
@@ -20,6 +21,7 @@ import {
   server_get_data,
   server_insert_request,
   server_insert_response,
+  server_set_data,
   server_update_request,
   server_update_response,
   set_clients,
@@ -209,43 +211,47 @@ class SyncService {
     });
   }
 
-  defineClientCommands(socket) {
+  defineClientCommands(client) {
     // Server said that this is a valid client
-    socket.on("valid_server", () => client_server_validated(this, socket));
+    client.on("valid_server", () => client_server_validated(this, client));
     // Server wants to update client list
-    socket.on("set_clients", (clients) =>
-      client_set_clients(this, socket, clients)
+    client.on("set_clients", (clients) =>
+      client_set_clients(this, client, clients)
     );
     // Server wants to insert data
-    socket.on("insert_request", (data) =>
-      client_insert_request(this, socket, data)
+    client.on("insert_request", (data) =>
+      client_insert_request(this, client, data)
     );
     // Server inserted data on all clients and is waiting for response
-    socket.on("insert_response", (data) =>
-      client_insert_response(this, socket, data)
+    client.on("insert_response", (data) =>
+      client_insert_response(this, client, data)
     );
     // Server wants to update data
-    socket.on("update_request", (data) =>
-      client_update_request(this, socket, data)
+    client.on("update_request", (data) =>
+      client_update_request(this, client, data)
     );
     // Server updated data on all clients and is waiting for response
-    socket.on("update_response", (data) =>
-      client_update_response(this, socket, data)
+    client.on("update_response", (data) =>
+      client_update_response(this, client, data)
     );
     // Server wants to delete data
-    socket.on("delete_request", (data) =>
-      client_delete_request(this, socket, data)
+    client.on("delete_request", (data) =>
+      client_delete_request(this, client, data)
     );
     // Server deleted data on all clients and is waiting for response
-    socket.on("delete_response", (data) =>
-      client_delete_response(this, socket, data)
+    client.on("delete_response", (data) =>
+      client_delete_response(this, client, data)
     );
     // Server wants to update data
-    socket.on("set_data", async (identifier, data, changes) =>
-      client_set_data(this, socket, identifier, data, changes)
+    client.on("set_data", async (identifier, data, changes) =>
+      client_set_data(this, client, identifier, data, changes)
+    );
+    // Server asked for updated data
+    client.on("get_data", async (identifier, externalId, latestChange) =>
+      client_get_data(this, client, identifier, externalId, latestChange)
     );
     // Server disconnected, try to connect to next client(Assuming next client is the server)
-    socket.on("disconnect", async () => {
+    client.on("disconnect", async () => {
       this.logger("Disconnected from server");
 
       if (await this.connectNextClient()) {
@@ -317,47 +323,51 @@ class SyncService {
     }, SERVICE_DISCOVERY_TIMEOUT);
   }
 
-  defineServerCommands(socket) {
+  defineServerCommands(server) {
     // When clients connect, we check if they are valid
-    socket.on("check_valid_server", (name) =>
-      check_valid_server(this, socket, name)
+    server.on("check_valid_server", (name) =>
+      check_valid_server(this, server, name)
     );
     // Clients can request the list of clients
-    socket.on("get_clients", () => set_clients(this, socket));
+    server.on("get_clients", () => set_clients(this, server));
     // Clients can request a insert, that will be synced to all other clients, and after on server
-    socket.on("insert_request", (data) =>
-      server_insert_request(this, socket, data)
+    server.on("insert_request", (data) =>
+      server_insert_request(this, server, data)
     );
     // When client has inserted data, it will send a response to the server that it has done so
-    socket.on("insert_response", (data) =>
-      server_insert_response(this, socket, data)
+    server.on("insert_response", (data) =>
+      server_insert_response(this, server, data)
     );
     // Clients can request a update, that will be synced to all other clients, and after on server
-    socket.on("update_request", (data) =>
-      server_update_request(this, socket, data)
+    server.on("update_request", (data) =>
+      server_update_request(this, server, data)
     );
     // When client has updated data, it will send a response to the server that it has done so
-    socket.on("update_response", (data) =>
-      server_update_response(this, socket, data)
+    server.on("update_response", (data) =>
+      server_update_response(this, server, data)
     );
     // Clients can request a delete, that will be synced to all other clients, and after on server
-    socket.on("delete_request", (data) =>
-      server_delete_request(this, socket, data)
+    server.on("delete_request", (data) =>
+      server_delete_request(this, server, data)
     );
     // When client has deleted data, it will send a response to the server that it has done so
-    socket.on("delete_response", (data) =>
-      server_delete_response(this, socket, data)
+    server.on("delete_response", (data) =>
+      server_delete_response(this, server, data)
     );
     // Clients can request data from the server
-    socket.on("get_data", (identifier, externalId, latestChange) => {
-      server_get_data(this, socket, identifier, externalId, latestChange);
+    server.on("get_data", (identifier, externalId, latestChange) => {
+      server_get_data(this, server, identifier, externalId, latestChange);
     });
+    // Clients can set data on the server
+    server.on("set_data", (identifier, data, changes) =>
+      server_set_data(this, server, identifier, data, changes)
+    );
     // When a client disconnects, we remove it from the list of clients
     // And send the new list to all clients
-    socket.on("disconnect", () => {
+    server.on("disconnect", () => {
       this.logger("Client disconnected");
-      this.clients = this.clients.filter((c) => c.id !== socket.id);
-      set_clients_everyone(this, socket);
+      this.clients = this.clients.filter((c) => c.id !== server.id);
+      set_clients_everyone(this, server);
     });
   }
 

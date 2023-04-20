@@ -13,7 +13,7 @@ const syncService = new SyncService(
   "TestServer 1",
   8002,
   8001,
-  false,
+  true,
   "databases/" + process.argv[2]
 );
 
@@ -133,7 +133,7 @@ const rl = readline.createInterface({
 });
 
 const refreshScreen = async () => {
-  console.clear();
+  // console.clear();
   console.log("Errors:");
   for (const error of errors) {
     console.log(error);

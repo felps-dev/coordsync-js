@@ -209,6 +209,49 @@ export const server_delete_response = (self, socket, data) => {
   }
 };
 
+export const server_set_data = async (
+  self,
+  socket,
+  identifier,
+  data,
+  changes = []
+) => {
+  self.logger("Got set data from client");
+  self.logger("Data: " + JSON.stringify(data));
+  const found = self.dataToSync.find(
+    (dataSync) => dataSync.identifier === identifier
+  );
+  if (found) {
+    const { options } = found;
+    self.logger("Broadcasting data to clients");
+    const data_to_send = [];
+    for (const item of data) {
+      const server_record = await options.getData(
+        item.externalId,
+        item.externalId
+      );
+      if (server_record.length === 0) {
+        await options.insert(item, item.externalId);
+      } else {
+        const newExternalId = (await options.getLatestExternalId()) + 1;
+        await options.insert(item, newExternalId);
+        item.externalId = newExternalId;
+        data_to_send.push(server_record[0]);
+      }
+      data_to_send.push(item);
+    }
+    for (const change of changes) {
+      if (!change) continue;
+      if (change.type === "delete") {
+        await options.delete(change.id);
+      }
+      insert_change(self.db, identifier, change.id, change.type, change.index);
+    }
+    self.logger("Data: " + JSON.stringify(data_to_send));
+    self.server.emit("set_data", identifier, data_to_send, changes);
+  }
+};
+
 export const server_get_data = async (
   self,
   socket,
@@ -228,9 +271,18 @@ export const server_get_data = async (
       throw new Error("getData function not defined on " + identifier);
     }
     const server_last_external_id = await options.getLatestExternalId();
-    if (server_last_external_id < lastExternalId) {
-      self.logger("Server has less data than client");
-      self.becomeClient();
+    if (server_last_external_id <= lastExternalId) {
+      self.logger(
+        "Server has less data or equal than client, requesting update"
+      );
+      const latest_change = await get_latest_change(self.db, identifier);
+      await socket.emit(
+        "get_data",
+        identifier,
+        server_last_external_id,
+        latest_change ? await options.getLatestExternalId() : 0,
+        latest_change
+      );
       return;
     }
     const data = await options.getData(lastExternalId);
