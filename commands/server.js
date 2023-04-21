@@ -86,12 +86,9 @@ export const server_insert_request = async (self, socket, data) => {
 export const server_insert_response = (self, socket, data) => {
   self.logger("Insert response from client");
   self.logger(JSON.stringify(data));
-  const server_queue = self.current_queue;
-  if (
-    server_queue.identifier === data.identifier &&
-    server_queue.externalId == data.externalId
-  ) {
-    self.current_queue.done.push({
+  const server_queue = self.getQueue(data.identifier, data.externalId);
+  if (server_queue) {
+    server_queue.done.push({
       id: socket.id,
     });
   }
@@ -142,12 +139,9 @@ export const server_update_request = async (self, socket, data) => {
 export const server_update_response = (self, socket, data) => {
   self.logger("Update response from client");
   self.logger(JSON.stringify(data));
-  const server_queue = self.current_queue;
-  if (
-    server_queue.identifier === data.identifier &&
-    server_queue.externalId == data.externalId
-  ) {
-    self.current_queue.done.push({
+  const server_queue = self.getQueue(data.identifier, data.externalId);
+  if (server_queue) {
+    server_queue.done.push({
       id: socket.id,
     });
   }
@@ -198,12 +192,9 @@ export const server_delete_request = async (self, socket, data) => {
 export const server_delete_response = (self, socket, data) => {
   self.logger("Delete response from client");
   self.logger(JSON.stringify(data));
-  const server_queue = self.current_queue;
-  if (
-    server_queue.identifier === data.identifier &&
-    server_queue.externalId == data.externalId
-  ) {
-    self.current_queue.done.push({
+  const server_queue = self.getQueue(data.identifier, data.externalId);
+  if (server_queue) {
+    server_queue.done.push({
       id: socket.id,
     });
   }

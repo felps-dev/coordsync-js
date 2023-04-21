@@ -15,11 +15,18 @@ export const processDataAndWaitFeedback = async (
   const externalId =
     data.externalId || (await options.getLatestExternalId()) + 1;
   //Emit to all clients and wait until everyone Done
-  self.current_queue = {
-    identifier,
+  const server_queue = self.getQueue(identifier, externalId);
+  if (server_queue) {
+    self.current_queue = self.current_queue.filter(
+      (queue) => queue !== server_queue
+    );
+  }
+  const current_queue = {
+    identifier: identifier,
     externalId: externalId,
     done: [],
   };
+  self.current_queue.push(current_queue);
   const isServer = self.server && self.serviceOnline;
   const emitter = shouldBroadcast ? socket.broadcast : socket;
   emitter.emit(procedure, {
@@ -34,9 +41,7 @@ export const processDataAndWaitFeedback = async (
     if (isServer) {
       for (const client of self.clients) {
         self.logger("Checking client " + client.id);
-        const found = self.current_queue.done.find(
-          (done) => done.id === client.id
-        );
+        const found = current_queue.done.find((done) => done.id === client.id);
         if (customCheckingCallback) {
           if (!customCheckingCallback(self, client, found, socket)) {
             allClientsDone = false;
@@ -50,12 +55,16 @@ export const processDataAndWaitFeedback = async (
         }
       }
     } else {
-      if (self.current_queue.done.length === 0) {
+      if (current_queue.done.length === 0) {
         allClientsDone = false;
         continue;
       }
     }
     allClientsDone = true;
   }
+  self.logger("All clients done");
+  self.current_queue = self.current_queue.filter(
+    (queue) => queue !== current_queue
+  );
   return externalId;
 };

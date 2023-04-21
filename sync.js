@@ -64,11 +64,9 @@ class SyncService {
     this.client_id = null;
     this.clients = [];
     this.dataToSync = [];
-    this.current_queue = {
-      identifier: null,
-      externalId: null,
-      done: [],
-    };
+    this.current_queue = [
+      { id: null, identifier: null, externalId: null, done: [] },
+    ];
     this.logger = (message, title) =>
       log_enabled ? simple_log(message, title) : null;
     this.log_enabled = log_enabled;
@@ -80,6 +78,17 @@ class SyncService {
       identifier,
       options,
     });
+  }
+
+  getQueue(identifier, externalId) {
+    let queue = this.current_queue.filter((q) => q.identifier === identifier);
+    if (externalId) {
+      queue = queue.filter((q) => q.externalId === externalId);
+    }
+    if (queue.length === 0) {
+      return null;
+    }
+    return queue[0];
   }
 
   async syncInserts(dataSync) {
