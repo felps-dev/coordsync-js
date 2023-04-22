@@ -302,21 +302,6 @@ export const server_get_data = async (
     if (!options.getData) {
       throw new Error("getData function not defined on " + identifier);
     }
-    // const server_last_external_id = await options.getLatestExternalId();
-    // if (server_last_external_id <= lastExternalId) {
-    //   self.logger(
-    //     "Server has less data or equal than client, requesting update"
-    //   );
-    //   const latest_change = await get_latest_change(self, identifier);
-    //   await socket.emit(
-    //     "get_data",
-    //     identifier,
-    //     server_last_external_id,
-    //     latest_change ? await options.getLatestExternalId() : 0,
-    //     latest_change
-    //   );
-    //   return;
-    // }
     const data = await options.getData(lastExternalId);
     const changes =
       (latestChange
