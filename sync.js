@@ -163,7 +163,7 @@ class SyncService {
     );
     this.logger(JSON.stringify(this.current_queue));
     options.afterUpdate(data_to_update);
-    insert_change(this.db, identifier, data_to_update.externalId, "update");
+    insert_change(this, identifier, data_to_update.externalId, "update");
   }
 
   async syncDeletes(dataSync) {
@@ -192,7 +192,7 @@ class SyncService {
     );
     this.logger(JSON.stringify(this.current_queue));
     options.afterDelete(data_to_delete);
-    insert_change(this.db, identifier, data_to_delete.externalId, "delete");
+    insert_change(this, identifier, data_to_delete.externalId, "delete");
   }
 
   startSyncing() {

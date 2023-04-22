@@ -13,7 +13,7 @@ const syncService = new SyncService(
   "TestServer 1",
   8002,
   8001,
-  true,
+  false,
   "chat_" + process.argv[2]
 );
 
@@ -137,7 +137,7 @@ const rl = readline.createInterface({
 });
 
 const refreshScreen = async () => {
-  // console.clear();
+  console.clear();
   console.log("Errors:");
   for (const error of errors) {
     console.log(error);
@@ -145,7 +145,6 @@ const refreshScreen = async () => {
   console.log("Messages:");
   const messages = await chat_database.findAsync({});
   messages.sort((a, b) => {
-    console.log(new Date(a.date), new Date(b.date));
     return new Date(a.date) - new Date(b.date);
   });
   for (const message of messages) {
