@@ -5,14 +5,17 @@ import {
   get_latest_change,
   insert_change,
 } from "../changes_db.js";
-import { processDataAndWaitFeedback } from "./shared.js";
+import { insert_or_update_index } from "../ids_db.js";
+import { insert_local_data, processDataAndWaitFeedback } from "./shared.js";
 
 // Check the service name is valid
 // If it is, then the server is valid
-export const check_valid_server = (self, socket, name) => {
+export const check_valid_server = (self, socket, name, instance_name) => {
   if (name === self.service.name) {
     self.logger("The client is valid");
-    socket.emit("valid_server");
+    socket.emit("valid_server", self.name);
+    self.clients.push({ ...socket, name: instance_name });
+    set_clients_everyone(self, socket);
   } else {
     self.logger("The client is not valid, disconnecting");
     socket.emit("disconnect");
@@ -30,6 +33,7 @@ export const set_clients = (self, socket) => {
         connected: c.connected,
         host,
         port,
+        name: c.name,
       };
     })
   );
@@ -62,7 +66,7 @@ export const server_insert_request = async (self, socket, data) => {
 
     const data_to_insert = data.data;
     //Emit to all clients and wait until everyone inserted
-    await processDataAndWaitFeedback(
+    const newExternalId = await processDataAndWaitFeedback(
       self,
       options,
       data.identifier,
@@ -74,8 +78,13 @@ export const server_insert_request = async (self, socket, data) => {
     );
     self.logger("All clients inserted");
     //Insert into local database
-    const newExternalId = (await options.getLatestExternalId()) + 1;
-    await options.insert(data_to_insert, newExternalId);
+    await insert_local_data(
+      self,
+      data.identifier,
+      options,
+      data_to_insert,
+      newExternalId
+    );
     await socket.emit("insert_response", {
       identifier: data.identifier,
       externalId: newExternalId,
@@ -83,10 +92,17 @@ export const server_insert_request = async (self, socket, data) => {
   }
 };
 
-export const server_insert_response = (self, socket, data) => {
+export const server_insert_response = async (self, socket, data) => {
   self.logger("Insert response from client");
   self.logger(JSON.stringify(data));
   const server_queue = self.getQueue(data.identifier, data.externalId);
+  const client = self.clients.find((c) => c.id === socket.id);
+  await insert_or_update_index(
+    self,
+    client.name,
+    data.identifier,
+    data.externalId
+  );
   if (server_queue) {
     server_queue.done.push({
       id: socket.id,
@@ -128,7 +144,7 @@ export const server_update_request = async (self, socket, data) => {
     self.logger("All clients updated");
     //Update local database
     await options.update(data_to_update);
-    await insert_change(self.db, data.identifier, data.externalId, "update");
+    await insert_change(self, data.identifier, data.externalId, "update");
     await socket.emit("update_response", {
       identifier: data.identifier,
       externalId: data.externalId,
@@ -181,7 +197,7 @@ export const server_delete_request = async (self, socket, data) => {
     self.logger("All clients deleted");
     //Delete from local database
     await options.delete(data_to_delete);
-    await insert_change(self.db, data.identifier, data.externalId, "delete");
+    await insert_change(self, data.identifier, data.externalId, "delete");
     await socket.emit("delete_response", {
       identifier: data.identifier,
       externalId: data.externalId,
@@ -205,7 +221,8 @@ export const server_set_data = async (
   socket,
   identifier,
   data,
-  changes = []
+  changes = [],
+  latestExternalId
 ) => {
   self.logger("Got set data from client");
   self.logger("Data: " + JSON.stringify(data));
@@ -214,31 +231,55 @@ export const server_set_data = async (
   );
   if (found) {
     const { options } = found;
+    let data_to_send = [];
+    let lowestExternalId = latestExternalId;
+    if (lowestExternalId == (await options.getLatestExternalId())) {
+      lowestExternalId++;
+      self.logger("Updating lowest external id to: " + lowestExternalId);
+    }
+    self.logger("Lowest external id: " + lowestExternalId);
+    self.logger("Latest external id: " + (await options.getLatestExternalId()));
     self.logger("Broadcasting data to clients");
-    const data_to_send = [];
+    const current_data = await options.getData(lowestExternalId);
     for (const item of data) {
+      if (current_data.find((d) => options.isEqual(d, item))) continue;
       const server_record = await options.getData(
         item.externalId,
         item.externalId
       );
       if (server_record.length === 0) {
-        await options.insert(item, item.externalId);
+        await insert_local_data(
+          self,
+          identifier,
+          options,
+          item,
+          item.externalId
+        );
+        self.logger("Inserted server record");
+        self.logger(JSON.stringify(item));
       } else {
+        if (options.isEqual(item, server_record[0])) continue;
         const newExternalId = (await options.getLatestExternalId()) + 1;
-        await options.insert(item, newExternalId);
         item.externalId = newExternalId;
-        data_to_send.push(server_record[0]);
+        await insert_local_data(
+          self,
+          identifier,
+          options,
+          item,
+          item.externalId
+        );
       }
-      data_to_send.push(item);
     }
     for (const change of changes) {
       if (!change) continue;
       if (change.type === "delete") {
         await options.delete(change.id);
       }
-      insert_change(self.db, identifier, change.id, change.type, change.index);
+      insert_change(self, identifier, change.id, change.type, change.index);
     }
     self.logger("Data: " + JSON.stringify(data_to_send));
+    //Get lowest external id from data array
+    data_to_send = await options.getData(lowestExternalId);
     self.server.emit("set_data", identifier, data_to_send, changes);
   }
 };
@@ -261,26 +302,26 @@ export const server_get_data = async (
     if (!options.getData) {
       throw new Error("getData function not defined on " + identifier);
     }
-    const server_last_external_id = await options.getLatestExternalId();
-    if (server_last_external_id <= lastExternalId) {
-      self.logger(
-        "Server has less data or equal than client, requesting update"
-      );
-      const latest_change = await get_latest_change(self.db, identifier);
-      await socket.emit(
-        "get_data",
-        identifier,
-        server_last_external_id,
-        latest_change ? await options.getLatestExternalId() : 0,
-        latest_change
-      );
-      return;
-    }
+    // const server_last_external_id = await options.getLatestExternalId();
+    // if (server_last_external_id <= lastExternalId) {
+    //   self.logger(
+    //     "Server has less data or equal than client, requesting update"
+    //   );
+    //   const latest_change = await get_latest_change(self, identifier);
+    //   await socket.emit(
+    //     "get_data",
+    //     identifier,
+    //     server_last_external_id,
+    //     latest_change ? await options.getLatestExternalId() : 0,
+    //     latest_change
+    //   );
+    //   return;
+    // }
     const data = await options.getData(lastExternalId);
     const changes =
       (latestChange
-        ? await get_changes(self.db, identifier, latestChange.index)
-        : [await get_latest_change(self.db, identifier)]) || [];
+        ? await get_changes(self, identifier, latestChange.index)
+        : [await get_latest_change(self, identifier)]) || [];
     for (const change of changes) {
       if (change && change.type === "update") {
         const data_to_update = await options.getData(change.id, change.id);

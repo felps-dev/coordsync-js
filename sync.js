@@ -1,7 +1,7 @@
 import Diont from "diont";
 import { Server as ioServer } from "socket.io";
 import { io } from "socket.io-client";
-import { insert_change, open_change_db } from "./changes_db.js";
+import { insert_change } from "./changes_db.js";
 import {
   client_delete_request,
   client_delete_response,
@@ -27,12 +27,13 @@ import {
   set_clients,
   set_clients_everyone,
 } from "./commands/server.js";
-import { processDataAndWaitFeedback } from "./commands/shared.js";
+import { open_db, processDataAndWaitFeedback } from "./commands/shared.js";
 import {
   PROCESSING_INTERVAL,
   RESTART_ON_ERROR_INTERVAL,
   SERVICE_DISCOVERY_TIMEOUT,
 } from "./constants.js";
+import { insert_or_update_index } from "./ids_db.js";
 import { sleep } from "./utils.js";
 
 function simple_log(message, title) {
@@ -45,7 +46,7 @@ class SyncService {
     servicePort,
     syncPort,
     log_enabled = true,
-    change_database_name = "changes_database"
+    instance_name = "default"
   ) {
     this.diont = Diont();
     this.service = {
@@ -55,6 +56,8 @@ class SyncService {
     this.syncService = {
       port: syncPort,
     };
+    this.name = instance_name;
+    this.current_server = null;
     this.serviceFound = false;
     this.serviceOnline = false;
     this.isSyncing = false;
@@ -70,7 +73,8 @@ class SyncService {
     this.logger = (message, title) =>
       log_enabled ? simple_log(message, title) : null;
     this.log_enabled = log_enabled;
-    this.db = open_change_db(change_database_name);
+    this.changes_db = open_db(`change_${instance_name}`);
+    this.index_db = open_db(`index_${instance_name}`);
   }
 
   defineSync(identifier, options) {
@@ -111,9 +115,9 @@ class SyncService {
     if (!data_to_insert) {
       return;
     }
+    const isServer = this.server && this.serviceOnline;
     this.logger("Inserting data");
     this.logger(JSON.stringify(data_to_insert));
-    const isServer = this.server && this.serviceOnline;
     const socket = isServer ? this.server : this.client;
     const newExternalId = await processDataAndWaitFeedback(
       this,
@@ -125,6 +129,12 @@ class SyncService {
     );
     this.logger(JSON.stringify(this.current_queue));
     options.afterInsert(data_to_insert, newExternalId);
+    insert_or_update_index(
+      this,
+      this.current_server.name,
+      identifier,
+      newExternalId
+    );
   }
 
   async syncUpdates(dataSync) {
@@ -222,7 +232,9 @@ class SyncService {
 
   defineClientCommands(client) {
     // Server said that this is a valid client
-    client.on("valid_server", () => client_server_validated(this, client));
+    client.on("valid_server", (server_name) =>
+      client_server_validated(this, client, server_name)
+    );
     // Server wants to update client list
     client.on("set_clients", (clients) =>
       client_set_clients(this, client, clients)
@@ -314,7 +326,7 @@ class SyncService {
 
     this.client.on("connect", async () => {
       this.logger("Connected as client");
-      this.client.emit("check_valid_server", this.service.name);
+      this.client.emit("check_valid_server", this.service.name, this.name);
     });
 
     this.defineClientCommands(this.client);
@@ -334,8 +346,8 @@ class SyncService {
 
   defineServerCommands(server) {
     // When clients connect, we check if they are valid
-    server.on("check_valid_server", (name) =>
-      check_valid_server(this, server, name)
+    server.on("check_valid_server", (name, instance_name) =>
+      check_valid_server(this, server, name, instance_name)
     );
     // Clients can request the list of clients
     server.on("get_clients", () => set_clients(this, server));
@@ -368,8 +380,8 @@ class SyncService {
       server_get_data(this, server, identifier, externalId, latestChange);
     });
     // Clients can set data on the server
-    server.on("set_data", (identifier, data, changes) =>
-      server_set_data(this, server, identifier, data, changes)
+    server.on("set_data", (identifier, data, changes, latestExternalId) =>
+      server_set_data(this, server, identifier, data, changes, latestExternalId)
     );
     // When a client disconnects, we remove it from the list of clients
     // And send the new list to all clients
@@ -382,12 +394,13 @@ class SyncService {
 
   async startServer() {
     this.server = new ioServer();
+    this.current_server = {
+      name: this.name,
+    };
     // After a client connects, we add it to the list of clients
     // And send the new list to all clients
     this.server.on("connection", (socket) => {
       this.logger("Someone connected to server");
-      this.clients.push(socket);
-      set_clients_everyone(this, socket);
       this.defineServerCommands(socket);
     });
     // If the server fails to start, we try again in 2 seconds
@@ -437,6 +450,9 @@ class SyncService {
     this.serviceFound = false;
     this.serviceOnline = false;
     this.isSyncing = false;
+    this.syncInterval = null;
+    this.current_server = null;
+    this.current_queue = [];
     clearInterval(this.syncInterval);
     this.logger("Stopped");
   }

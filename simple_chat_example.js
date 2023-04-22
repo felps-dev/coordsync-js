@@ -14,7 +14,7 @@ const syncService = new SyncService(
   8002,
   8001,
   true,
-  "databases/" + process.argv[2]
+  "chat_" + process.argv[2]
 );
 
 const errors = [];
@@ -34,6 +34,9 @@ syncService.defineSync("test", {
       return latest.externalId;
     }
     return 0;
+  },
+  isEqual: (data1, data2) => {
+    return data1.message === data2.message;
   },
   getData: async (from, to) => {
     if (to) {
@@ -58,7 +61,7 @@ syncService.defineSync("test", {
   insert: async (data, externalId) => {
     await chat_database.insert({
       message: data.message,
-      date: data.date,
+      date: typeof data.date === "string" ? Date.parse(data.date) : data.date,
       externalId,
       mustUpdate: false,
       lastUpdate: data.lastUpdate,
@@ -90,7 +93,8 @@ syncService.defineSync("test", {
       {
         $set: {
           message: data.message,
-          date: data.date,
+          date:
+            typeof data.date === "string" ? Date.parse(data.date) : data.date,
           mustUpdate: false,
           lastUpdate: data.lastUpdate,
           mustDelete: false,
@@ -139,7 +143,11 @@ const refreshScreen = async () => {
     console.log(error);
   }
   console.log("Messages:");
-  const messages = await chat_database.findAsync({}).sort({ externalId: 1 });
+  const messages = await chat_database.findAsync({});
+  messages.sort((a, b) => {
+    console.log(new Date(a.date), new Date(b.date));
+    return new Date(a.date) - new Date(b.date);
+  });
   for (const message of messages) {
     console.log(`${message.message} - ${message.externalId}`);
   }

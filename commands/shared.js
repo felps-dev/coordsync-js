@@ -1,5 +1,32 @@
+import Datastore from "@seald-io/nedb";
 import { PROCESSING_INTERVAL } from "../constants.js";
+import { insert_or_update_index } from "../ids_db.js";
 import { sleep } from "../utils.js";
+
+export const open_db = (db_name) => {
+  const db = new Datastore({
+    filename: "./databases/" + db_name,
+    autoload: true,
+  });
+  return db;
+};
+
+export const insert_local_data = async (
+  self,
+  identifier,
+  options,
+  data,
+  externalId
+) => {
+  await options.insert(data, externalId);
+  self.logger("Inserted data");
+  insert_or_update_index(
+    self,
+    self.current_server.name,
+    identifier,
+    externalId
+  );
+};
 
 export const processDataAndWaitFeedback = async (
   self,
@@ -36,12 +63,14 @@ export const processDataAndWaitFeedback = async (
   });
   let allClientsDone = false;
   self.logger("Waiting for all clients...");
+  self.logger("Current queue: " + JSON.stringify(current_queue));
   while (!allClientsDone) {
+    const the_queue = self.getQueue(identifier, externalId);
     await sleep(PROCESSING_INTERVAL);
     if (isServer) {
       for (const client of self.clients) {
         self.logger("Checking client " + client.id);
-        const found = current_queue.done.find((done) => done.id === client.id);
+        const found = the_queue.done.find((done) => done.id === client.id);
         if (customCheckingCallback) {
           if (!customCheckingCallback(self, client, found, socket)) {
             allClientsDone = false;
@@ -55,7 +84,7 @@ export const processDataAndWaitFeedback = async (
         }
       }
     } else {
-      if (current_queue.done.length === 0) {
+      if (the_queue.done.length === 0) {
         allClientsDone = false;
         continue;
       }
