@@ -1,8 +1,19 @@
+import { insert_or_update_index } from "./ids_db.js";
+
 export const insert_change = async (self, identifier, id, type, index) => {
   const db = self.changes_db;
   const last_index =
     (await db.findOneAsync({ identifier }).sort({ index: -1 }))?.index || 0;
-  db.insert({ index: index || last_index + 1, identifier, id, type });
+  const latest_change_index = index || last_index + 1;
+  await db.insert({ index: latest_change_index, identifier, id, type });
+  insert_or_update_index(
+    self,
+    self.current_server.name,
+    identifier,
+    undefined,
+    latest_change_index
+  );
+  return latest_change_index;
 };
 
 export const get_changes = async (self, identifier, from) => {

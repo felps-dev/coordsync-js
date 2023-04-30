@@ -13,7 +13,7 @@ const syncService = new SyncService(
   "TestServer 1",
   8002,
   8001,
-  false,
+  true,
   "chat_" + process.argv[2]
 );
 
@@ -119,9 +119,9 @@ syncService.defineSync("test", {
   decideDelete: () => {
     return true;
   },
-  delete: async (data) => {
+  delete: async (externalId) => {
     await chat_database.removeAsync(
-      { externalId: Number(data.externalId) },
+      { externalId: Number(externalId) },
       {},
       logerror
     );
@@ -137,7 +137,7 @@ const rl = readline.createInterface({
 });
 
 const refreshScreen = async () => {
-  console.clear();
+  // console.clear();
   console.log("Errors:");
   for (const error of errors) {
     console.log(error);

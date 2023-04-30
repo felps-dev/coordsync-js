@@ -3,7 +3,11 @@ import {
   get_latest_change,
   insert_change,
 } from "../changes_db.js";
-import { get_latest_index, insert_or_update_index } from "../ids_db.js";
+import {
+  get_latest_change_index,
+  get_latest_index,
+  insert_or_update_index,
+} from "../ids_db.js";
 import { insert_local_data } from "./shared.js";
 
 export const client_set_clients = async (self, socket, clients) => {
@@ -11,8 +15,12 @@ export const client_set_clients = async (self, socket, clients) => {
   self.logger("Clients: " + JSON.stringify(clients));
   self.clients = clients;
   for (const dataSync of self.dataToSync) {
-    const latest_change = await get_latest_change(self, dataSync.identifier);
     const latest_known_server_id = await get_latest_index(
+      self,
+      self.current_server.name,
+      dataSync.identifier
+    );
+    const latest_known_server_change_id = await get_latest_change_index(
       self,
       self.current_server.name,
       dataSync.identifier
@@ -27,18 +35,18 @@ export const client_set_clients = async (self, socket, clients) => {
         socket,
         dataSync.identifier,
         latest_known_server_id,
-        latest_change
+        latest_known_server_change_id
       );
       return true;
     }
-    self.logger("Latest change: " + latest_change);
+    self.logger("Latest change: " + latest_known_server_change_id);
     self.logger("Sending get_data request to server");
     self.logger("Identifier: " + dataSync.identifier);
     self.client.emit(
       "get_data",
       dataSync.identifier,
       latest_known_server_id,
-      latest_change
+      latest_known_server_change_id
     );
   }
 };
@@ -126,7 +134,7 @@ export const client_delete_request = (self, socket, data) => {
   );
   if (found) {
     const { options } = found;
-    options.delete(data.data);
+    options.delete(data.data.externalId);
     insert_change(self, data.identifier, data.externalId, "delete");
     socket.emit("delete_response", {
       identifier: data.identifier,
@@ -156,11 +164,19 @@ export const client_set_data = async (
 ) => {
   self.logger("Got set data from server");
   self.logger("Data: " + JSON.stringify(data));
+  self.logger("Changes: " + JSON.stringify(changes));
   const found = self.dataToSync.find(
     (dataSync) => dataSync.identifier === identifier
   );
   if (found) {
     const { options } = found;
+    for (const change of changes) {
+      if (!change) continue;
+      if (change.type === "delete") {
+        await options.delete(change.id);
+      }
+      insert_change(self, identifier, change.id, change.type, change.index);
+    }
     for (const item of data) {
       const local_data = await options.getData(
         item.externalId,
@@ -177,13 +193,6 @@ export const client_set_data = async (
       } else {
         await options.update(item);
       }
-    }
-    for (const change of changes) {
-      if (!change) continue;
-      if (change.type === "delete") {
-        await options.delete(change.id);
-      }
-      insert_change(self, identifier, change.id, change.type, change.index);
     }
     const latest_id = await options.getLatestExternalId();
     await insert_or_update_index(
@@ -220,12 +229,13 @@ export const client_get_data = async (
     const data = await options.getData(Number(lastExternalId) + 1);
     const changes =
       (latestChange
-        ? await get_changes(self, identifier, latestChange.index)
+        ? await get_changes(self, identifier, latestChange)
         : [await get_latest_change(self, identifier)]) || [];
     for (const change of changes) {
       if (change && change.type === "update") {
         const data_to_update = await options.getData(change.id, change.id);
         if (data_to_update.length > 0) {
+          if (data.find((d) => d.externalId === change.id)) continue;
           data.push(data_to_update[0]);
         }
       }

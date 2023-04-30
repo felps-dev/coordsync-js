@@ -196,7 +196,7 @@ export const server_delete_request = async (self, socket, data) => {
     );
     self.logger("All clients deleted");
     //Delete from local database
-    await options.delete(data_to_delete);
+    await options.delete(data_to_delete.externalId);
     await insert_change(self, data.identifier, data.externalId, "delete");
     await socket.emit("delete_response", {
       identifier: data.identifier,
@@ -226,12 +226,30 @@ export const server_set_data = async (
 ) => {
   self.logger("Got set data from client");
   self.logger("Data: " + JSON.stringify(data));
+  self.logger("Changes: " + JSON.stringify(changes));
   const found = self.dataToSync.find(
     (dataSync) => dataSync.identifier === identifier
   );
   if (found) {
     const { options } = found;
+    let lowestChangeId = 0;
     let data_to_send = [];
+
+    for (const change of changes) {
+      if (!change) continue;
+      if (change.type === "delete") {
+        await options.delete(change.id);
+      }
+      if (change.index < lowestChangeId) lowestChangeId = change.index;
+      await insert_change(
+        self,
+        identifier,
+        change.id,
+        change.type,
+        change.index
+      );
+    }
+    const changes_to_send = await get_changes(self, identifier, lowestChangeId);
     let lowestExternalId = latestExternalId;
     if (lowestExternalId == (await options.getLatestExternalId())) {
       lowestExternalId++;
@@ -259,6 +277,12 @@ export const server_set_data = async (
         self.logger(JSON.stringify(item));
       } else {
         if (options.isEqual(item, server_record[0])) continue;
+        if (changes_to_send.find((c) => c.id === item.externalId)) {
+          await options.update(item);
+          self.logger("Updated server record");
+          self.logger(JSON.stringify(item));
+          continue;
+        }
         const newExternalId = (await options.getLatestExternalId()) + 1;
         item.externalId = newExternalId;
         await insert_local_data(
@@ -270,17 +294,18 @@ export const server_set_data = async (
         );
       }
     }
-    for (const change of changes) {
-      if (!change) continue;
-      if (change.type === "delete") {
-        await options.delete(change.id);
-      }
-      insert_change(self, identifier, change.id, change.type, change.index);
+    for (const change of changes_to_send) {
+      if (change.type === "delete") continue;
+      if (change.id < lowestExternalId) lowestExternalId = change.id;
+      self.logger("Found change to send");
+      self.logger(JSON.stringify(change));
+      self.logger("Lowest external id: " + lowestExternalId);
     }
-    self.logger("Data: " + JSON.stringify(data_to_send));
     //Get lowest external id from data array
     data_to_send = await options.getData(lowestExternalId);
-    self.server.emit("set_data", identifier, data_to_send, changes);
+    self.logger("Data: " + JSON.stringify(data_to_send));
+    self.logger("Changes: " + JSON.stringify(changes_to_send));
+    self.server.emit("set_data", identifier, data_to_send, changes_to_send);
   }
 };
 
@@ -305,7 +330,7 @@ export const server_get_data = async (
     const data = await options.getData(lastExternalId);
     const changes =
       (latestChange
-        ? await get_changes(self, identifier, latestChange.index)
+        ? await get_changes(self, identifier, latestChange)
         : [await get_latest_change(self, identifier)]) || [];
     for (const change of changes) {
       if (change && change.type === "update") {
