@@ -1,4 +1,5 @@
 {
+  "indent": 2,
   "root": true,
   "parserOptions": {
     "ecmaVersion": 12,

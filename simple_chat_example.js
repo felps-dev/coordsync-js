@@ -1,6 +1,6 @@
 /* eslint-disable no-console */
 import readline from "readline";
-import SyncService from "./sync.js";
+import SyncService from "./src/sync.js";
 
 import Datastore from "@seald-io/nedb";
 

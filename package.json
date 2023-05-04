@@ -1,20 +1,37 @@
 {
   "name": "coordsync",
-  "version": "1.0.0",
-  "description": "",
-  "main": "sync.js",
+  "version": "0.0.1",
+  "description": "A simple library to synchronize data between multiple devices",
+  "main": "dist/sync.js",
   "type": "module",
   "scripts": {
+    "build": "npx --package typescript tsc",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "author": "",
-  "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/felps-dev/coordsync-js.git"
+  },
+  "keywords": [
+    "coordsync",
+    "sync",
+    "coord",
+    "synchronize",
+    "multiple devices"
+  ],
+  "author": "Felipe Correa",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/felps-dev/coordsync-js/issues"
+  },
+  "homepage": "https://github.com/felps-dev/coordsync-js#readme",
   "dependencies": {
     "@seald-io/nedb": "^4.0.1",
     "bonjour": "^3.5.0",
     "diont": "^1.0.0",
     "socket.io": "^4.6.1",
-    "socket.io-client": "^4.6.1"
+    "socket.io-client": "^4.6.1",
+    "typescript": "^5.0.4"
   },
   "devDependencies": {
     "eslint": "^8.38.0",
