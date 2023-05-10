@@ -1,9 +1,9 @@
 {
   "name": "coordsync",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "A simple library to synchronize data between multiple devices",
   "main": "dist/sync.js",
-  "type": "module",
+  "type": "commonjs",
   "scripts": {
     "build": "npx --package typescript tsc",
     "test": "echo \"Error: no test specified\" && exit 1",
