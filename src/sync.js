@@ -112,7 +112,7 @@ class SyncService {
       throw new Error("No insert function defined on " + identifier);
     }
     const data_to_insert = await options.fetchInsert();
-    if (!data_to_insert) {
+    if (!data_to_insert || data_to_insert.length === 0) {
       return;
     }
     const isServer = this.server && this.serviceOnline;
@@ -146,7 +146,7 @@ class SyncService {
       throw new Error("No update function defined on " + identifier);
     }
     const data_to_update = await options.fetchUpdate();
-    if (!data_to_update) {
+    if (!data_to_update || data_to_update.length === 0) {
       return;
     }
     this.logger("Updating data");
@@ -175,7 +175,7 @@ class SyncService {
       throw new Error("No delete function defined on " + identifier);
     }
     const data_to_delete = await options.fetchDelete();
-    if (!data_to_delete) {
+    if (!data_to_delete || data_to_delete.length === 0) {
       return;
     }
     this.logger("Deleting data");
