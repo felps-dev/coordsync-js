@@ -70,9 +70,14 @@ class SyncService {
     this.current_queue = [
       { id: null, identifier: null, externalId: null, done: [] },
     ];
-    this.logger = (message, title) =>
-      log_enabled ? simple_log(message, title) : null;
-    this.log_enabled = log_enabled;
+    if (typeof log_enabled === "function") {
+      this.logger = log_enabled;
+      this.log_enabled = true;
+    } else {
+      this.logger = (message, title) =>
+        log_enabled ? simple_log(message, title) : null;
+      this.log_enabled = log_enabled;
+    }
     this.changes_db = open_db(`change_${instance_name}`);
     this.index_db = open_db(`index_${instance_name}`);
   }
