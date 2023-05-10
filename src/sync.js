@@ -45,7 +45,7 @@ class SyncService {
     serviceName,
     servicePort,
     syncPort,
-    log_enabled = true,
+    log_enabled,
     instance_name = "default"
   ) {
     this.diont = Diont();
