@@ -1,6 +1,6 @@
 {
   "name": "coordsync",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "description": "A simple library to synchronize data between multiple devices",
   "main": "dist/sync.js",
   "type": "commonjs",
@@ -30,8 +30,8 @@
     "@seald-io/nedb": "^4.0.1",
     "bonjour": "^3.5.0",
     "diont": "https://github.com/felps-dev/Diont.git",
-    "socket.io": "^4.6.1",
-    "socket.io-client": "^4.6.1",
+    "socket.io": "4.6.1",
+    "socket.io-client": "4.6.1",
     "typescript": "^5.0.4"
   },
   "devDependencies": {

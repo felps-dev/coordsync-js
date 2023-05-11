@@ -327,6 +327,7 @@ class SyncService {
     this.client = io(`http://${host}:${port}`, {
       reconnection: false,
       timeout: 3000,
+      autoConnect: false,
     });
 
     this.client.on("connect", async () => {
