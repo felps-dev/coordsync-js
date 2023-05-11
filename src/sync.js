@@ -236,6 +236,10 @@ class SyncService {
   }
 
   defineClientCommands(client) {
+    client.on("after_connect", () => {
+      this.logger("Connected as client");
+      this.client.emit("check_valid_server", this.service.name, this.name);
+    });
     // Server said that this is a valid client
     client.on("valid_server", (server_name) =>
       client_server_validated(this, client, server_name)
@@ -330,11 +334,6 @@ class SyncService {
       autoConnect: false,
     });
 
-    this.client.on("connect", async () => {
-      this.logger("Connected as client");
-      this.client.emit("check_valid_server", this.service.name, this.name);
-    });
-
     this.defineClientCommands(this.client);
     this.client.connect();
   }
@@ -408,6 +407,7 @@ class SyncService {
     this.server.on("connection", (socket) => {
       this.logger("Someone connected to server");
       this.defineServerCommands(socket);
+      socket.emit("after_connect");
     });
     // If the server fails to start, we try again in 2 seconds
     // This is to prevent the server from crashing
