@@ -1,6 +1,6 @@
 {
   "name": "coordsync",
-  "version": "0.0.9",
+  "version": "0.0.10",
   "description": "A simple library to synchronize data between multiple devices",
   "main": "dist/sync.js",
   "type": "commonjs",
